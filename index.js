@@ -1,48 +1,45 @@
 import dotenv from "dotenv";
 import express from "express";
-import { Telegraf } from "telegraf";
-import { Configuration, OpenAIApi } from "openai";
 import bodyParser from "body-parser";
+import {
+  generateResponse,
+  generateImage,
+  generateChatResponse,
+} from "./utils/functions.js";
+import { bot } from "./utils/bot.js";
 dotenv.config();
-const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
+
 const app = express();
 app.use(express.json());
 app.use(bodyParser.json());
 
-const configuration = new Configuration({
-  apiKey: process.env.OPENAI_API_KEY,
+app.use((err, req, res, next) => {
+  console.error(err.stack); // Log the error stack trace
+  res.status(500).send("An error occurred, the server will be reset.");
+
+  // Send an exit signal to the Node.js process
+  process.exit(1);
 });
-const openai = new OpenAIApi(configuration);
 
-async function generateResponse(prompt) {
-  console.log(`Prompt: ${prompt}`);
-  try {
-    const response = await openai.createCompletion({
-      model: "text-davinci-003",
-      prompt: prompt,
-      temperature: 0,
-      max_tokens: 100,
-      top_p: 1,
-      frequency_penalty: 0.0,
-      presence_penalty: 0.0,
-      // stop: ["\n"],
-    });
-
-    // const response = await post(openaiUrl, data, { headers: headers });
-    console.log(response.data.choices[0].text);
-    return response.data.choices[0].text;
-  } catch (error) {
-    console.error(`Error generating response: ${error}`);
-    return "An error occurred while generating a response. Please try again.";
-  }
-}
+app.post("/img", async (req, res) => {
+  const prompt = req.body.prompt;
+  const response = await generateImage(prompt);
+  console.log(response);
+  res.send(response).status(200);
+});
 
 app.post("/bot", async (req, res) => {
   const prompt = req.body.prompt;
   const response = await generateResponse(prompt);
   console.log(response);
   res.send(response).status(200);
-  // res.status(200);
+});
+
+app.post("/prompt", async (req, res) => {
+  const prompt = req.body.prompt;
+  const response = await generateChatResponse(prompt);
+  console.log(response);
+  res.send(response).status(200);
 });
 
 app.listen(process.env.PORT || 3002, () => {
@@ -54,14 +51,33 @@ bot.start((ctx) => {
     "Welcome to the ChatGPT Bot! Send me a message, and I will generate a response using GPT-3."
   );
 });
+bot.hears("hi", (ctx) => ctx.reply("Hey there"));
+bot.hears(["Hi", "hi", "hey"], (ctx) => ctx.reply("Hey there"));
+bot.command("fact", (ctx) => ctx.reply("👍"));
+bot.command("voice", async (ctx) => {
+  ctx.replyWithVoice(
+    "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"
+  );
+});
+bot.command("list", (ctx) =>
+  ctx.telegram.getMyCommands().then((res) => console.log(res))
+);
 
 bot.on("message", async (ctx) => {
-  console.log(ctx.message.text);
-  const prompt = ctx.message.text;
-  const response = await generateResponse(prompt);
-  ctx.reply(response);
+  if (ctx.message.text.split(" ")[0] === "/img") {
+    const imgPrompt = ctx.message.text.split(" ").slice(1).join(" ");
+    const imgResponse = await generateImage(imgPrompt);
+    return ctx.replyWithPhoto(imgResponse);
+  } else {
+    console.log(ctx.message.text);
+    const prompt = ctx.message.text;
+    const response = await generateChatResponse(prompt);
+    return ctx.reply(response);
+  }
 });
 
-bot.launch();
+bot.entity("hello", (ctx) => ctx.reply("Hey there"));
+
+bot.launch((ctx) => ctx.telegram.setCommands(["fact", "voice"]));
 
 console.log("Telegram ChatGPT Bot is running...");
